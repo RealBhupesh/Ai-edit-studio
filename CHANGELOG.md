@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Clearer tool argument errors:** invalid values report numeric constraints, allowed choices, text length or the accepted identifier pattern while keeping `INVALID_ARGUMENTS` and argument paths unchanged (#91).
+
 ## 0.12.0 — captions, chapters and a friendlier CLI
 
 Better subtitles in and out, chapters inside the MP4, exact NTSC frame rates and a CLI that explains itself. 59 tools, nothing removed.
