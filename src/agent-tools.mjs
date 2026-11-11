@@ -508,4 +508,4 @@ async function readStdin() {
   let text = '';
   for await (const chunk of process.stdin) { text += chunk; if (text.length > 12 * 1024 * 1024) throw new StudioError('REQUEST_TOO_LARGE', 'Request exceeds 12 MiB.'); }
   return text;
-        }
+}
