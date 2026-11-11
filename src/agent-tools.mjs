@@ -264,8 +264,8 @@ export function validateArguments(value, schema, location = 'arguments') {
   } else if (schema.type === 'null') { if (value !== null) fail('expected null'); }
   else if (typeof value !== schema.type) fail(`expected ${schema.type}`);
   if (schema.enum && !schema.enum.includes(value)) {
-    const choices = schema.enum.slice(0, 4).map(item => schemaDiagnostic(item)).join(', ');
-    fail(`unsupported choice; allowed choices: ${choices}${schema.enum.length > 4 ? ', … (see schema)' : ''}`);
+    const choices = schema.enum.slice(0, 32).map(item => schemaDiagnostic(item)).join(', ');
+    fail(`unsupported choice; allowed choices: ${choices}${schema.enum.length > 32 ? ', … (see schema)' : ''}`);
   }
   if (schema.maxLength && value.length > schema.maxLength) fail(`text too long; maximum ${schemaDiagnostic(schema.maxLength)} UTF-16 code units; actual UTF-16 length ${typeof value === 'string' ? value.length : 'unavailable'}`);
   if (schema.pattern && !new RegExp(schema.pattern).test(value)) fail(`invalid identifier; expected pattern ${schemaDiagnostic(schema.pattern, 64)}`);
@@ -508,4 +508,4 @@ async function readStdin() {
   let text = '';
   for await (const chunk of process.stdin) { text += chunk; if (text.length > 12 * 1024 * 1024) throw new StudioError('REQUEST_TOO_LARGE', 'Request exceeds 12 MiB.'); }
   return text;
-}
+        }
