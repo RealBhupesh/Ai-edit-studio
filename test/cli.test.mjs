@@ -48,6 +48,56 @@ test('-h prints the same top-level help as --help', () => {
   assert.equal(short.stderr, '');
 });
 
+test('studio help aliases print the same tool list as studio --help', () => {
+  const run = args => spawnSync(process.execPath, [path.join(ROOT, 'cli.mjs'), ...args], {
+    encoding: 'utf8', timeout: 5000, maxBuffer: 1024 * 1024,
+    env: { ...process.env, GAME_TRAILER_STUDIO_DATA_ROOT: path.join(ROOT, '.studio-data', 'cli-test') },
+  });
+  const expected = run(['studio', '--help']);
+  assert.equal(expected.status, 0, expected.stderr);
+  assert.equal(expected.stderr, '');
+  for (const args of [['studio'], ['studio', '-h'], ['studio', 'help'], ['studio', 'help', '--help']]) {
+    const result = run(args);
+    assert.equal(result.status, 0, result.stderr || args.join(' '));
+    assert.equal(result.stdout, expected.stdout, args.join(' '));
+    assert.equal(result.stderr, '', args.join(' '));
+  }
+});
+
+test('unknown studio tool names remain errors', () => {
+  for (const args of [['studio', 'nope'], ['studio', 'nope', '--help']]) {
+    const result = spawnSync(process.execPath, [path.join(ROOT, 'cli.mjs'), ...args], {
+      encoding: 'utf8', timeout: 5000, maxBuffer: 1024 * 1024,
+      env: { ...process.env, GAME_TRAILER_STUDIO_DATA_ROOT: path.join(ROOT, '.studio-data', 'cli-test') },
+    });
+    assert.equal(result.status, 1, args.join(' '));
+    assert.equal(result.stdout, '');
+    assert.equal(JSON.parse(result.stderr).error.code, 'UNKNOWN_TOOL');
+  }
+});
+
+test('unknown studio tool names fail before calling the API', async () => {
+  let calls = 0;
+  const api = async () => { calls += 1; throw new Error('API must not be called'); };
+  await assert.rejects(runStudioCommand('nope', {}, api), error => error.code === 'UNKNOWN_TOOL');
+  assert.equal(calls, 0);
+});
+
+test('studio get keeps the existing API dispatch', async () => {
+  const id = '00000000-0000-0000-0000-000000000001';
+  const calls = [];
+  const api = async (route, request) => {
+    calls.push({ route, request });
+    if (route === '/health') return { service: 'AI Edit Studio', version: '0.12.0' };
+    assert.equal(route, `/studio/projects/${id}`);
+    assert.equal(request, undefined);
+    return { project: { id, revision: 1 } };
+  };
+  const result = await runStudioCommand('get', { project: id }, api);
+  assert.deepEqual(calls.map(call => call.route), ['/health', `/studio/projects/${id}`]);
+  assert.deepEqual(result, { project: { id, revision: 1 } });
+});
+
 test('parseArguments keeps everything after the first = in a flag value', () => {
   const { flags, positional } = parseArguments([
     '--title=Score=100',
