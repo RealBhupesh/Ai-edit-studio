@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { callAgentTool, validateArguments, agentTools } from '../src/agent-tools.mjs';
+import { callAgentTool, validateArguments, agentTools, STUDIO_VERSION } from '../src/agent-tools.mjs';
 
 const projectId = '00000000-0000-0000-0000-000000000000';
 const schema = name => agentTools.find(t => t.name === `studio_${name}`).inputSchema;
@@ -48,6 +48,22 @@ test('enum details preserve numeric and false choices', () => {
   const falsy = schema('auto_edit').properties.reframe.anyOf[1];
   assert.doesNotThrow(() => validateArguments(false, falsy));
   assert.equal(errorFor(true, falsy), 'arguments: unsupported choice; allowed choices: false');
+});
+
+test('enum diagnostics list every real operation, master format and platform choice', () => {
+  const submitted = 'SYNTHETIC_PRIVATE_ENUM_91_ONLY';
+  const definitions = [
+    schema('edit').properties.operations.items.properties.op,
+    schema('update').properties.options.properties.masterFormat,
+    schema('auto_edit').properties.platform,
+  ];
+  for (const definition of definitions) {
+    assert.ok(definition.enum.length > 4 && definition.enum.length <= 32);
+    const message = errorFor(submitted, definition);
+    assert.equal(message, `arguments: unsupported choice; allowed choices: ${definition.enum.map(item => JSON.stringify(item)).join(', ')}`);
+    assert.ok(!message.includes(submitted));
+    for (const value of definition.enum) assert.doesNotThrow(() => validateArguments(value, definition));
+  }
 });
 
 test('pattern details describe the actual accepted shape without tightening it', () => {
@@ -107,15 +123,24 @@ test('new diagnostic details do not echo submitted synthetic private values', ()
 });
 
 test('schema metadata is escaped and bounded before rendering', () => {
-  const definition = { type: 'string', enum: ['quote"\n\\', '\u0000'.repeat(1000), 'x'.repeat(1000), 'last', 'omitted'] };
-  const message = errorFor('submitted', definition);
+  const definition = { type: 'string', enum: [
+    'quote"\n\\', '\u0000'.repeat(1000), 'x'.repeat(1000),
+    ...Array.from({ length: 28 }, (_, i) => `choice-${i + 4}`), 'last-visible', 'omitted',
+  ] };
+  const submitted = 'SYNTHETIC_PRIVATE_ENUM_91_ONLY';
+  const message = errorFor(submitted, definition);
   assert.ok(message.includes(JSON.stringify('quote"\n\\')));
   assert.ok(!message.includes('\n'));
+  assert.ok(!message.includes('\u0000'));
   assert.ok(message.includes(JSON.stringify('\u0000'.repeat(16)) + '…'));
   assert.ok(message.includes(JSON.stringify('x'.repeat(16)) + '…'));
-  assert.ok(message.endsWith(', … (see schema)'));
+  for (const item of definition.enum.slice(3, 32)) assert.ok(message.includes(JSON.stringify(item)));
+  assert.ok(message.endsWith('"last-visible", … (see schema)'));
   assert.ok(!message.includes('omitted'));
-  assert.ok(message.length <= 'arguments: unsupported choice; allowed choices: '.length + 418);
+  assert.ok(!message.includes(submitted));
+  assert.ok(message.length <= 'arguments: unsupported choice; allowed choices: '.length + 3246);
+  assert.ok(errorFor(submitted, { ...definition, enum: definition.enum.slice(0, 32) }).endsWith('"last-visible"'));
+  assert.doesNotThrow(() => validateArguments('omitted', definition));
   const pattern = '^' + 'x'.repeat(1000) + '$';
   const patternMessage = errorFor('submitted', { type: 'string', pattern });
   assert.equal(patternMessage, `arguments: invalid identifier; expected pattern ${JSON.stringify(pattern.slice(0, 64))}…`);
@@ -127,7 +152,7 @@ test('schema metadata is escaped and bounded before rendering', () => {
 test('direct valid tools keep prehealth returns and routed local stub wiring', async () => {
   let unexpected = 0;
   const noApi = async () => { unexpected++; throw new Error('unexpected API call'); };
-  assert.equal((await callAgentTool('studio_schema', {}, noApi)).version, '0.12.0');
+  assert.equal((await callAgentTool('studio_schema', {}, noApi)).version, STUDIO_VERSION);
   assert.equal((await callAgentTool('studio_guide', { topic: 'story' }, noApi)).version, 'aes.story/1');
   assert.equal(unexpected, 0);
   const calls = [];
