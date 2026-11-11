@@ -233,6 +233,10 @@ async function main() {
   const { positional, flags } = parseArguments(args);
   const [command, subcommand, third] = positional;
   const jsonMode = boolFlag(flags.json, false);
+  if (command === 'studio' &&
+      (!subcommand || subcommand === 'help' || subcommand === '-h')) {
+    return help();
+  }
   if (command === 'studio' && subcommand && flags.help) return console.log(studioHelp(subcommand));
   if (!command || command === 'help' || flags.help) return help();
   // MCP over stdio for `npx -y ai-edit-studio mcp` (the registry entry uses this). Print nothing before it starts.
