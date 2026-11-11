@@ -50,10 +50,15 @@ const str = (v, max, name, required = false) => {
 const words = s => String(s).replace(/[*\n]/g, ' ').split(/\s+/).filter(Boolean).length;
 /** Reading time for a card: 0.4 s + 0.22 s per word. */
 export const readSeconds = s => 0.4 + 0.22 * words(s);
-const color = (v, d) => {
+const color = (v, d, name) => {
   const c = v === undefined ? d : String(v);
-  if (!/^#[0-9a-f]{6}$/i.test(c)) fail(`Colour ${c} must look like #1e4f91.`);
-  return c.toLowerCase();
+  if (!/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(c)) {
+    fail(`${name}: use a hex colour like #1e4f91 (or #fff).`);
+  }
+  const expanded = c.length === 4
+    ? `#${c.slice(1).replace(/./g, '$&$&')}`
+    : c;
+  return expanded.toLowerCase();
 };
 
 // ---------------------------------------------------------------------------------------------------- scene timing
@@ -216,12 +221,12 @@ function normalizeStyle(raw = {}) {
   if (!isObj(raw)) fail('style must be an object.');
   const bg = raw.background ?? {};
   return {
-    accent: color(raw.accent, '#8db4ee'),
-    accent2: color(raw.accent2, '#f0b544'),
-    ink: color(raw.ink, '#e8eef0'),
-    muted: color(raw.muted, '#9aa8b4'),
-    panel: color(raw.panel, '#0f2138'),
-    background: { from: color(bg.from, '#070e17'), to: color(bg.to, '#10243e') },
+    accent: color(raw.accent, '#8db4ee', 'style.accent'),
+    accent2: color(raw.accent2, '#f0b544', 'style.accent2'),
+    ink: color(raw.ink, '#e8eef0', 'style.ink'),
+    muted: color(raw.muted, '#9aa8b4', 'style.muted'),
+    panel: color(raw.panel, '#0f2138', 'style.panel'),
+    background: { from: color(bg.from, '#070e17', 'style.background.from'), to: color(bg.to, '#10243e', 'style.background.to') },
     font: str(raw.font, 80, 'style.font'), fontBody: str(raw.fontBody, 80, 'style.fontBody'), fontMono: str(raw.fontMono, 80, 'style.fontMono'),
     fontsDir: str(raw.fontsDir, 1000, 'style.fontsDir'),
     grain: num(raw.grain, 6, 0, 20, 'style.grain'),
