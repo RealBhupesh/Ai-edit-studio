@@ -229,6 +229,13 @@ export function openAiTools(style = 'responses') {
     : { type: 'function', name, description, parameters: inputSchema, strict: false });
 }
 
+const schemaDiagnostic = (item, max = 16) => {
+  if (typeof item === 'string') return JSON.stringify(item.slice(0, max)) + (item.length > max ? '…' : '');
+  if (typeof item === 'number') return Number.isFinite(item) ? JSON.stringify(item) : String(item);
+  if (typeof item === 'boolean' || item === null) return JSON.stringify(item);
+  return '[non-scalar schema value]';
+};
+
 export function validateArguments(value, schema, location = 'arguments') {
   const fail = message => { throw new StudioError('INVALID_ARGUMENTS', `${location}: ${message}`); };
   if (schema.anyOf) {
@@ -247,12 +254,21 @@ export function validateArguments(value, schema, location = 'arguments') {
     if (!Array.isArray(value) || value.length < (schema.minItems ?? 0) || value.length > (schema.maxItems ?? Infinity)) fail('invalid array size');
     value.forEach((v, i) => validateArguments(v, schema.items, `${location}[${i}]`));
   } else if (schema.type === 'number' || schema.type === 'integer') {
-    if (!Number.isFinite(value) || (schema.type === 'integer' && !Number.isInteger(value)) || value < (schema.minimum ?? -Infinity) || value > (schema.maximum ?? Infinity)) fail('invalid numeric value');
+    if (!Number.isFinite(value) || (schema.type === 'integer' && !Number.isInteger(value)) || value < (schema.minimum ?? -Infinity) || value > (schema.maximum ?? Infinity)) {
+      const bounds = [
+        schema.minimum == null ? '' : ` >= ${schemaDiagnostic(schema.minimum)}`,
+        schema.maximum == null ? '' : ` <= ${schemaDiagnostic(schema.maximum)}`,
+      ].join('');
+      fail(`invalid numeric value; expected finite ${schema.type}${bounds}; received type ${typeof value}`);
+    }
   } else if (schema.type === 'null') { if (value !== null) fail('expected null'); }
   else if (typeof value !== schema.type) fail(`expected ${schema.type}`);
-  if (schema.enum && !schema.enum.includes(value)) fail('unsupported choice');
-  if (schema.maxLength && value.length > schema.maxLength) fail('text too long');
-  if (schema.pattern && !new RegExp(schema.pattern).test(value)) fail('invalid identifier');
+  if (schema.enum && !schema.enum.includes(value)) {
+    const choices = schema.enum.slice(0, 4).map(item => schemaDiagnostic(item)).join(', ');
+    fail(`unsupported choice; allowed choices: ${choices}${schema.enum.length > 4 ? ', … (see schema)' : ''}`);
+  }
+  if (schema.maxLength && value.length > schema.maxLength) fail(`text too long; maximum ${schemaDiagnostic(schema.maxLength)} UTF-16 code units; actual UTF-16 length ${typeof value === 'string' ? value.length : 'unavailable'}`);
+  if (schema.pattern && !new RegExp(schema.pattern).test(value)) fail(`invalid identifier; expected pattern ${schemaDiagnostic(schema.pattern, 64)}`);
 }
 
 const storyGuide = topic => { if (topic === undefined || topic === 'story') return STORY_GUIDE; throw new StudioError('INVALID_ARGUMENTS', 'topic must be "story".'); };
