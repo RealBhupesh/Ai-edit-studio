@@ -177,12 +177,14 @@ export function wordsInEdit(words, clips, sourceIndex) {
   });
 }
 
-/** Captions for one source from the words that are still in the edit. */
+/** Captions for one source from the words that are still in the edit. Returns every cue:
+ *  the caller applies LIMITS.captions and reports what it had to leave out (#105), so a
+ *  long talk no longer loses its last minutes here without saying so. */
 export function captionsFromEdit(words, clips, sourceIndex, options = {}) {
   const marked = wordsInEdit(words, clips, sourceIndex);
   const kept = [], breakBefore = new Set();
   marked.forEach((w, i) => { if (w.inEdit) { if (i > 0 && !marked[i - 1].inEdit && kept.length) breakBefore.add(kept.length); kept.push(w); } });
-  return wordsToCaptions(kept, sourceIndex, { ...options, breakBefore }).slice(0, 300);
+  return wordsToCaptions(kept, sourceIndex, { ...options, breakBefore });
 }
 
 /** Plain text with optional [mm:ss] stamps every ~20 s; used by agents to read a transcript cheaply. */

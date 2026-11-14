@@ -2,7 +2,11 @@
 // The timeline is gapless: every clip follows the previous one, so trims ripple.
 // Clips reference ORIGINAL source time; timeline time is derived.
 
-export const LIMITS = Object.freeze({ clips: 200, editSeconds: 1200, sources: 24, sourceSeconds: 7200, minSource: 0.5, minTimeline: 0.25, texts: 100, markers: 100, overlays: 50 });
+// `captions` is one line per second of the longest edit: a viewer cannot read more
+// than one cue per second, so a 20-minute edit (`editSeconds`) never needs more
+// lines than it has seconds. It stays its own number because a caption is not a
+// second — the two limits are equal today by that argument, not by accident.
+export const LIMITS = Object.freeze({ clips: 200, editSeconds: 1200, captions: 1200, sources: 24, sourceSeconds: 7200, minSource: 0.5, minTimeline: 0.25, texts: 100, markers: 100, overlays: 50 });
 export const CLIP_FIELDS = Object.freeze(['id', 'sourceIndex', 'start', 'end', 'speed', 'gain', 'framing', 'zoom', 'zoomEnd', 'focusX', 'focusY', 'focusXEnd', 'focusYEnd', 'mirror', 'label', 'audioShift',
   'transition', 'transitionSeconds', 'brightness', 'contrast', 'saturation', 'temperature', 'sharpen', 'denoise', 'stabilize']);
 /** Transition INTO a clip from the previous one. Keys are FFmpeg xfade names (plus cut). */
@@ -50,21 +54,43 @@ export function normalizeOverlays(rows = []) {
 /** Sections (chapters) of a long edit: each starts at an anchor clip id, so they survive reorders and trims. */
 export function normalizeSections(rows = []) {
   if (!Array.isArray(rows) || rows.length > 60) throw new EditError('At most 60 sections.', 'INVALID_SECTION');
-  const seen = new Set();
+  const seen = new Set(), anchors = new Map();
   return rows.map((r, i) => {
     const name = String(r?.name ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
     const clip = String(r?.clip ?? '');
     if (!name) throw new EditError(`Section ${i + 1}: name is missing.`, 'INVALID_SECTION');
     if (!/^[a-z0-9]{1,24}$/.test(clip)) throw new EditError(`Section ${i + 1}: anchor clip id is invalid.`, 'INVALID_SECTION');
     if (seen.has(name.toLowerCase())) throw new EditError(`Section names must be unique ("${name}").`, 'INVALID_SECTION');
-    seen.add(name.toLowerCase());
+    // A shot starts one section: two on the same shot leave the first one without any shots (#138).
+    if (anchors.has(clip)) throw new EditError(`Sections "${anchors.get(clip)}" and "${name}" both start at shot ${clip}. A shot can start only one section.`, 'INVALID_SECTION');
+    seen.add(name.toLowerCase()); anchors.set(clip, name);
     return { name, clip, ...(r.color ? { color: ['yellow', 'red', 'green', 'blue', 'purple'].includes(r.color) ? r.color : 'yellow' } : {}) };
   });
+}
+/** Sections saved before two on one shot were refused: the last one on a shot wins, the order stays (#138). */
+export function oneSectionPerShot(sections = []) {
+  const last = new Map(sections.map((s, i) => [s?.clip, i]));
+  return sections.filter((s, i) => last.get(s?.clip) === i);
+}
+/**
+ * Section proposals for an edit: labelled markers, else every change of recording, else (or when that
+ * gives fewer than two) a cut about every two minutes. Never two proposals on one shot.
+ */
+export function suggestSections(clips = [], { markers = [], sources = [] } = {}) {
+  const rows = layout(clips), proposals = [];
+  const add = (name, r) => { if (!proposals.some(p => p.clip === r.id)) proposals.push({ name: name.slice(0, 60), clip: r.id, at: Math.round(r.visibleStart * 10) / 10 }); };
+  for (const m of markers.filter(m => m.label)) { const r = rows.find(x => x.visibleEnd > m.time); if (r) add(m.label, r); }
+  if (!proposals.length) rows.forEach((r, i) => { if (!i || r.sourceIndex !== rows[i - 1].sourceIndex) add(`Part ${proposals.length + 1} · ${sources[r.sourceIndex]?.name ?? ''}`, r); });
+  if (proposals.length < 2) {
+    let next = 0;
+    for (const r of rows) if (r.visibleStart >= next) { add(`Part ${proposals.length + 1}`, r); next = r.visibleStart + 120; }
+  }
+  return proposals.slice(0, 30);
 }
 /** Sections with their current timeline span and clip ids, in timeline order (anchors that no longer exist drop out). */
 export function sectionSpans(clips, sections = []) {
   const rows = layout(clips);
-  const anchored = sections.map(s => ({ ...s, index: clips.findIndex(c => c.id === s.clip) })).filter(s => s.index >= 0).sort((a, b) => a.index - b.index);
+  const anchored = oneSectionPerShot(sections).map(s => ({ ...s, index: clips.findIndex(c => c.id === s.clip) })).filter(s => s.index >= 0).sort((a, b) => a.index - b.index);
   return anchored.map((s, k) => {
     const endIndex = (anchored[k + 1]?.index ?? clips.length) - 1;
     const first = rows[s.index], last = rows[endIndex];

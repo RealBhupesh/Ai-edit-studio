@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { findFfmpegTools } from '../src/ffmpeg.mjs';
 import { runProcess } from '../src/process.mjs';
-import { applyOperations, normalizeSections, sectionSpans, totalDuration, layout } from '../public/edit-ops.js';
+import { applyOperations, normalizeSections, sectionSpans, suggestSections, oneSectionPerShot, totalDuration, layout } from '../public/edit-ops.js';
 import { buildFilter, segmentBoundaries } from '../src/render.mjs';
 import { validateClips } from '../src/editing.mjs';
 import { fitDuration, searchWords, searchProject, assembleFromScript, scriptLines, multicamPlan, exportTimeline, timecode, dropFrameTimecode, chapterMarks, chapterMetadata } from '../src/longform.mjs';
@@ -337,6 +337,34 @@ test('0.8 tools: 46 tools, schemas validate, version gate, routes', async () => 
   assert.deepEqual(calls.filter(c => c[0] !== '/health').map(c => c[0]), [`/studio/projects/${id}/search`, `/studio/projects/${id}/export-timeline`, `/studio/projects/${id}/render-range`]);
   const old = async route => (route === '/health' ? { service: 'AI Edit Studio', version: '0.7.0-beta.1' } : {});
   await assert.rejects(callAgentTool('studio_sections', { projectId: id }, old), /RESTART_REQUIRED|predates/);
+});
+
+test('sections: never two on one shot — suggestions, saving and old projects (#138)', () => {
+  // One recording, two shots, 20 s: the "every ~2 minutes" pass used to add "Part 2" on the first shot again.
+  const two = [{ id: 'a', sourceIndex: 0, start: 0, end: 10 }, { id: 'b', sourceIndex: 0, start: 10, end: 20 }];
+  const short = suggestSections(two, { sources: [{ name: 'a.mp4' }] });
+  assert.deepEqual(short, [{ name: 'Part 1 · a.mp4', clip: 'a', at: 0 }]);
+  // A long recording still gets a section about every two minutes, each on its own shot.
+  const long = Array.from({ length: 8 }, (_, i) => ({ id: `s${i}`, sourceIndex: 0, start: i * 60, end: i * 60 + 60 }));
+  const parts = suggestSections(long, { sources: [{ name: 'talk.mp4' }] });
+  assert.deepEqual(parts.map(p => [p.name, p.clip, p.at]), [['Part 1 · talk.mp4', 's0', 0], ['Part 2', 's2', 120], ['Part 3', 's4', 240], ['Part 4', 's6', 360]]);
+  // Two labelled markers inside one shot give one proposal; a change of recording gives one per recording.
+  assert.deepEqual(suggestSections(two, { markers: [{ time: 1, label: 'Intro' }, { time: 4, label: 'Still intro' }, { time: 12, label: 'Demo' }] }).map(p => [p.name, p.clip]), [['Intro', 'a'], ['Demo', 'b']]);
+  const mixed = [{ id: 'a', sourceIndex: 0, start: 0, end: 5 }, { id: 'b', sourceIndex: 1, start: 0, end: 5 }];
+  assert.deepEqual(suggestSections(mixed, { sources: [{ name: 'one' }, { name: 'two' }] }).map(p => p.clip), ['a', 'b']);
+  for (const list of [short, parts]) assert.equal(new Set(list.map(p => p.clip)).size, list.length);
+  assert.deepEqual(suggestSections([]), []);
+
+  // Saving: the second section on a shot is refused, and the answer names both.
+  const pair = [{ name: 'Part 1 · a.mp4', clip: 'a' }, { name: 'Part 2', clip: 'a' }];
+  assert.throws(() => normalizeSections(pair), e => e.code === 'INVALID_SECTION' && /"Part 1 · a\.mp4" and "Part 2" both start at shot a/.test(e.message));
+
+  // A project that already holds such a pair: spans do not throw, the last section on the shot wins.
+  assert.deepEqual(oneSectionPerShot([...pair, { name: 'End', clip: 'b' }]).map(s => s.name), ['Part 2', 'End']);
+  const spans = sectionSpans(two, pair);
+  assert.deepEqual(spans.map(s => [s.name, s.start, s.end, s.clipIds]), [['Part 2', 0, 20, ['a', 'b']]]);
+  assert.deepEqual(sectionSpans(two, [...pair, { name: 'End', clip: 'b' }]).map(s => [s.name, s.clipIds]), [['Part 2', ['a']], ['End', ['b']]]);
+  assert.deepEqual(chapterMarks(two, { sections: pair }).map(c => c.title ?? c.name), ['Part 2']);
 });
 
 test('chapterMarks: sections, markers only and brand intro offset', () => {

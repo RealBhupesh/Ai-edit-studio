@@ -2,7 +2,7 @@
 import { LIMITS, overlapOf } from './edit-ops.js';
 import { splitWords, joinWords } from './transcript.js';
 export function normalizeCaptions(rows = []) {
-  if (!Array.isArray(rows) || rows.length > 300) throw new Error('At most 300 caption lines.');
+  if (!Array.isArray(rows) || rows.length > LIMITS.captions) throw new Error(`At most ${LIMITS.captions} caption lines.`);
   return rows.map((c, i) => {
     if (!Number.isInteger(c.sourceIndex) || c.sourceIndex < 0 || c.sourceIndex >= LIMITS.sources
       || !Number.isFinite(c.start) || !Number.isFinite(c.end) || c.start < 0 || c.end <= c.start || c.end > LIMITS.sourceSeconds) {

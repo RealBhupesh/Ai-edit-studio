@@ -99,7 +99,8 @@ const severityWeight = { error: 18, warning: 7, tip: 2 };
  * Plan-level quality review. Each issue may carry `fix.operations` that can be
  * sent to studio_edit unchanged. Nothing is applied automatically.
  */
-export function reviewEdit({ clips, sources, options = {}, beats = [], analyzed = true, curves: given }) {
+export function reviewEdit({ clips, sources, options = {}, beats = [], analyzed = true, curves: given,
+  captionsDropped = 0, captionsDroppedSources = [] }) {
   const issues = [];
   const add = (severity, code, message, extra = {}) => issues.push({ severity, code, message, ...extra });
   const rows = layout(clips);
@@ -186,6 +187,12 @@ export function reviewEdit({ clips, sources, options = {}, beats = [], analyzed 
     if (mean > 0.08) add('tip', 'OFF_BEAT', `Cuts are on average ${Math.round(mean * 1000)} ms off the beat.`, { fix: { label: 'Snap cuts to beat', operations: [{ op: 'beat_sync' }] } });
   }
   if (!analyzed) add('tip', 'NOT_ANALYZED', 'Analyze the sources for picture/sound checks (black frames, hook, silence).');
+  // The caption cap is a real loss of content, not a style tip: an agent that only
+  // calls studio_review has to see that the end of the transcript has no captions (#105).
+  if (captionsDropped > 0) {
+    const from = captionsDroppedSources.length ? ` Sources that lost lines: ${captionsDroppedSources.map(i => `#${i}`).join(', ')}.` : '';
+    add('warning', 'CAPTIONS_LIMIT', `${captionsDropped} caption(s) were not added: at most ${LIMITS.captions} lines. Shorten the edit or split it, or the end of the talk will have no captions.${from}`, { time: 0 });
+  }
 
   const order = { error: 0, warning: 1, tip: 2 };
   issues.sort((a, b) => order[a.severity] - order[b.severity] || (a.time ?? 0) - (b.time ?? 0));

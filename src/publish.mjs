@@ -9,9 +9,32 @@ import { StudioError, writeJsonAtomic } from './paths.mjs';
 import { findFfmpegTools, inspectFfmpeg } from './ffmpeg.mjs';
 import { runProcess } from './process.mjs';
 import { filterColors } from './render.mjs';
-import { layout, totalDuration } from '../public/edit-ops.js';
+import { layout, totalDuration, sectionSpans } from '../public/edit-ops.js';
 import { curvesFor, clipEnergy } from '../public/insights.js';
 import { mapCaptions, toSrt, toVtt } from '../public/captions.js';
+// Width in "Latin units" for the fixed-size font used by the publish pack:
+// Han / Hiragana / Katakana and full-width punctuation take twice the room of
+// a Latin letter. Counting UTF-16 units for everything else keeps the
+// word-based wrapping of plain Latin titles byte-for-byte unchanged.
+// \u3040-\u30ff also covers Script=Common kana marks such as the prolonged
+// sound mark 'ー' (U+30FC), which are just as wide as the surrounding kana.
+const WIDE_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\u3000-\u303f\u3040-\u30ff\u31f0-\u31ff\uff00-\uffef]/u;
+const charWidth = ch => (WIDE_RE.test(ch) ? 2 : ch.length);
+function widthOf(text) {
+  let w = 0;
+  for (const ch of text) w += charWidth(ch);
+  return w;
+}
+/** Longest prefix of `text` (by code point, never splitting a surrogate pair) whose width fits `budget`. */
+function takeByWidth(text, budget) {
+  let out = '', w = 0;
+  for (const ch of text) {
+    const cw = charWidth(ch);
+    if (w + cw > budget) break;
+    out += ch; w += cw;
+  }
+  return out;
+}
 
 export const PUBLISH_PLATFORMS = Object.freeze({
   youtube: { name: 'YouTube', titleMax: 100, descriptionMax: 5000, tags: [] },
@@ -35,11 +58,17 @@ const shorten = (text, max) => {
 };
 const filterPath = value => path.resolve(value).replaceAll('\\', '/').replace(':', '\\:').replaceAll("'", "\\'");
 
-/** YouTube-style chapters (first at 0:00, ≥3 chapters, ≥10 s apart) from labelled markers or clip labels. */
+/** YouTube-style chapters (first at 0:00, ≥3 chapters, ≥10 s apart): sections first, else labelled markers or clip labels. */
 export function chapters(clips, options = {}) {
   const total = totalDuration(clips);
-  let rows = (options.markers ?? []).filter(m => m.label).map(m => ({ time: m.time, title: clean(m.label, 60) }));
-  if (rows.length < 2) rows = layout(clips).filter(r => r.label && r.label !== 'hook').map(r => ({ time: r.visibleStart, title: clean(r.label, 60) }));
+  const sections = sectionSpans(clips, options.sections ?? []);
+  let rows;
+  if (sections.length) {
+    rows = sections.map(s => ({ time: s.start, title: clean(s.name, 60) }));
+  } else {
+    rows = (options.markers ?? []).filter(m => m.label).map(m => ({ time: m.time, title: clean(m.label, 60) }));
+    if (rows.length < 2) rows = layout(clips).filter(r => r.label && r.label !== 'hook').map(r => ({ time: r.visibleStart, title: clean(r.label, 60) }));
+  }
   rows = rows.filter(r => r.time < total - 10).sort((a, b) => a.time - b.time);
   const out = [];
   for (const r of rows) if (!out.length || r.time - out.at(-1).time >= 10) out.push(r);
@@ -157,13 +186,39 @@ async function renderStill({ source, time, out, width, height, focusX = 0.5, foc
     '-frames:v', '1', '-vf', vf, '-q:v', '2', out], { timeoutMs: 60_000 });
 }
 export function wrapTitle(text, max) {
+  const value = String(text ?? '');
   const lines = []; let line = '';
-  for (const word of text.split(' ')) { if (line && (line + ' ' + word).length > max) { lines.push(line); line = ''; } line += (line ? ' ' : '') + word; }
+  for (const word of value.split(' ')) {
+    // A word containing wide (CJK / full-width) characters can be wider than
+    // the whole line budget by itself. Cut it into width-sized pieces, flushing
+    // the line built so far first. This is the same code path for a title with
+    // no spaces and for a spaced title with a long CJK run (#97).
+    if (WIDE_RE.test(word) && widthOf(word) > max) {
+      if (line) { lines.push(line); line = ''; }
+      let rest = word;
+      while (widthOf(rest) > max) {
+        let piece = takeByWidth(rest, max);
+        if (!piece) piece = [...rest][0]; // a single code point wider than max
+        lines.push(piece);
+        rest = rest.slice(piece.length);
+      }
+      line = rest; // the last piece can still take following words
+      continue;
+    }
+    // For text without wide characters widthOf() equals .length, so Latin
+    // titles wrap byte-for-byte as they did before this change.
+    if (line && widthOf(line + ' ' + word) > max) { lines.push(line); line = ''; }
+    line += (line ? ' ' : '') + word;
+  }
   if (line) lines.push(line);
   if (lines.length > 3) {
+    // Reserve one unit for the ellipsis, so the last line plus '…' still fits
+    // inside `max` units (six CJK characters plus '…' would be one too wide).
+    const budget = max - 1;
     const last = lines[2];
-    const boundary = last.lastIndexOf(' ', max - 1);
-    const shortened = last.length < max ? last : last.slice(0, boundary > 0 ? boundary : max - 1);
+    const boundary = last.lastIndexOf(' ', budget);
+    const shortened = widthOf(last) <= budget ? last
+      : takeByWidth(boundary > 0 ? last.slice(0, boundary) : last, budget);
     lines[2] = shortened.replace(/[\uD800-\uDBFF]$/, '') + '…';
   }
   return lines.slice(0, 3).join('\n');

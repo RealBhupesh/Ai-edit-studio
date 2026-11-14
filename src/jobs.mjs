@@ -24,10 +24,17 @@ function cleanText(value, maximum = 160) {
   return String(value ?? '').replace(/[\r\n\t\0]+/g, ' ').trim().slice(0, maximum);
 }
 
-function numberInRange(value, minimum, maximum, fallback) {
+/** A supplied number must be usable and in range; an omitted or empty one keeps
+ *  the default (the legacy editor page sends empty fields, the API may omit them).
+ *  Clamping a bad value silently used to render a whole trailer with the wrong
+ *  length or frame rate, so refuse it with a stable code instead (#134). */
+function numberOption(value, { name, code, minimum, maximum, fallback, unit = '' }) {
+  if (value === undefined || value === null || value === '') return fallback;
   const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.min(maximum, Math.max(minimum, parsed));
+  if (typeof value === 'boolean' || !Number.isFinite(parsed) || parsed < minimum || parsed > maximum) {
+    throw new StudioError(code, `Invalid ${name}: ${value}. Use ${minimum} to ${maximum}${unit ? ` ${unit}` : ''}.`);
+  }
+  return parsed;
 }
 
 function isPlainObject(value) {
@@ -49,7 +56,7 @@ function booleanOption(value, name, fallback) {
   throw new StudioError('INVALID_BOOLEAN', `${name} must be true or false.`);
 }
 
-function normalizeRequest(request = {}) {
+export function normalizeRequest(request = {}) {
   if (!isPlainObject(request)) {
     throw new StudioError('INVALID_REQUEST', 'The production request must be a JSON object.');
   }
@@ -76,16 +83,16 @@ function normalizeRequest(request = {}) {
   return {
     project,
     input: path.resolve(input),
-    duration: numberInRange(request.duration, 5, 300, 60),
+    duration: numberOption(request.duration, { name: 'duration', code: 'INVALID_DURATION', minimum: 5, maximum: 300, fallback: 60, unit: 'seconds' }),
     style,
     title: cleanText(request.title, 140),
     music: String(request.music ?? '').trim(),
     output: output ? path.resolve(output) : '',
     resolution,
-    fps: Math.round(numberInRange(request.fps, 24, 120, 60)),
+    fps: Math.round(numberOption(request.fps, { name: 'fps', code: 'INVALID_FPS', minimum: 24, maximum: 120, fallback: 60, unit: 'frames per second' })),
     preview: previewOnly || booleanOption(request.preview, 'preview', true),
     previewOnly,
-    seed: Math.round(numberInRange(request.seed, 0, 2_147_483_647, 42)),
+    seed: Math.round(numberOption(request.seed, { name: 'seed', code: 'INVALID_SEED', minimum: 0, maximum: 2_147_483_647, fallback: 42 })),
   };
 }
 

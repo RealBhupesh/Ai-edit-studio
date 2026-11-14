@@ -230,8 +230,16 @@ export function buildAutoEdit({ sources, options = {}, goal = {}, beats = [], tr
   if (goal.hookText) texts.push({ start: 0.15, end: Math.min(2.6, totalDuration(clips) - 0.2), text: String(goal.hookText).slice(0, 120), style: 'big', position: platform.aspect === '9:16' ? 'high' : 'center' });
   patch.texts = texts;
   const captions = [];
+  let captionsDropped = 0, captionsDroppedSources = [];
   for (const [index, t] of Object.entries(transcripts)) if (t?.words?.length) captions.push(...captionsFromEdit(t.words, clips, Number(index)));
-  if (captions.length) { patch.captions = captions.slice(0, 300); steps.push(`${patch.captions.length} caption(s) from the transcript`); }
+  if (captions.length) {
+    const leftOut = captions.slice(LIMITS.captions);
+    patch.captions = captions.slice(0, LIMITS.captions);
+    captionsDropped = leftOut.length;
+    captionsDroppedSources = [...new Set(leftOut.map(c => c.sourceIndex))];
+    steps.push(`${patch.captions.length} caption(s) from the transcript`);
+    if (captionsDropped) steps.push(`${captionsDropped} caption(s) not added: at most ${LIMITS.captions} lines`);
+  }
 
   // 5. Beat sync and an automatic review-fix loop.
   let state = { clips: coreClips(clips), options: { ...options, ...patch } };
@@ -262,7 +270,7 @@ export function buildAutoEdit({ sources, options = {}, goal = {}, beats = [], tr
       duration: r3(totalDuration(state.clips)), target: r3(target), shots: state.clips.length,
       footageUsedSeconds: r3(used), footageUsedPercent: Math.round(100 * used / Math.max(1, available)),
       hook: review.hook?.score ?? null, review: { score: review.score, grade: review.grade, counts: review.counts, top: review.issues.slice(0, 4).map(i => ({ code: i.code, message: i.message })) },
-      formats: platform.formats, aspect: platform.aspect, steps,
+      formats: platform.formats, aspect: platform.aspect, steps, captionsDropped, captionsDroppedSources,
       note: 'Selection uses measured motion, loudness, scene cuts and black frames — not story or meaning. Watch the preview.',
     },
   };

@@ -175,6 +175,54 @@ test('publish: chapters, drafts, hashtags and frame quality', () => {
   assert.equal(frameQuality(Buffer.alloc(160 * 90, 5)).mean, 5);
 });
 
+test('publish: chapters use sections before markers or clip labels', () => {
+  const clips = [
+    { id: 'a', sourceIndex: 0, start: 0, end: 40 },
+    { id: 'b', sourceIndex: 0, start: 40, end: 80 },
+    { id: 'c', sourceIndex: 0, start: 80, end: 120 },
+  ];
+  const sections = [
+    { name: 'Setup', clip: 'a' },
+    { name: 'Build', clip: 'b' },
+    { name: 'Result', clip: 'c' },
+  ];
+  const expected = ['00:00 Setup', '00:40 Build', '01:20 Result'];
+
+  // Sections produce chapters even when the clips have no labels.
+  assert.deepEqual(
+    chapters(clips, { sections }).map(c => c.line),
+    expected
+  );
+
+  const labelledClips = clips.map((clip, i) => ({
+    ...clip,
+    label: `Clip ${i + 1}`,
+  }));
+  const markers = [
+    { time: 0, label: 'Marker A' },
+    { time: 40, label: 'Marker B' },
+    { time: 80, label: 'Marker C' },
+  ];
+
+  // Sections take precedence over both markers and clip labels.
+  assert.deepEqual(
+    chapters(labelledClips, { sections, markers }).map(c => c.line),
+    expected
+  );
+
+  // An empty sections list preserves the marker fallback.
+  assert.deepEqual(
+    chapters(labelledClips, { sections: [], markers }).map(c => c.line),
+    ['00:00 Marker A', '00:40 Marker B', '01:20 Marker C']
+  );
+
+  // Too few sections must not fall back to otherwise valid markers or labels.
+  assert.deepEqual(
+    chapters(labelledClips, { sections: sections.slice(0, 2), markers }),
+    []
+  );
+});
+
 test('publish: hashtags preserve Japanese voiced kana', () => {
   assert.deepEqual(
     hashtags('新しいアップデートが公開されました', 'ゲームの新しいステージ'),

@@ -4,6 +4,7 @@ import { normalizeOptions, validateClips, proposeEdit, validateCaptionSources } 
 import { normalizeFinish, normalizeTransform, gradeFilter } from '../src/finishing.mjs';
 import { EditHistory, splitClip, availableClip } from '../public/edit-history.js';
 import { parseSrt, parseSrtCues, parseVttCues, mapCaptions, normalizeCaptions, toSrt, toVtt } from '../public/captions.js';
+import { LIMITS } from '../public/edit-ops.js';
 import { callAgentTool, agentTools } from '../src/agent-tools.mjs';
 import { buildFilter, renderTrailer } from '../src/render.mjs';
 import { proposeSilenceCuts } from '../src/silence.mjs';
@@ -99,9 +100,14 @@ test('SRT: an empty cue is skipped, like the WebVTT importer does', () => {
   assert.throws(() => parseSrt(only), /SRT has no captions/);
 });
 test('transcript cues drop the caption limits; VTT reads header, settings, ids and short times', () => {
-  const long = Array.from({ length: 400 }, (_, i) => `${i + 1}\n00:00:${String(i % 60).padStart(2, '0')},${String((i * 7) % 1000).padStart(3, '0')} --> 00:00:${String((i + 1) % 60).padStart(2, '0')},000\ncue ${i + 1}`).join('\n\n');
-  assert.equal(parseSrtCues(long).length, 400);
-  assert.throws(() => parseSrt(long), /At most 300 caption lines|too large/);
+  const srt = n => Array.from({ length: n }, (_, i) => {
+    const at = s => `00:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')},000`;
+    return `${i + 1}\n${at(i)} --> ${at(i + 1)}\ncue ${i + 1}`;
+  }).join('\n\n');
+  // 400 cues is a normal 20-minute talk, so both parsers must read it in full (#105).
+  assert.equal(parseSrtCues(srt(400)).length, 400);
+  assert.equal(parseSrt(srt(400)).length, 400);
+  assert.throws(() => parseSrt(srt(LIMITS.captions + 1)), new RegExp(`At most ${LIMITS.captions} caption lines|too large`));
   assert.ok(parseSrtCues(`1\n00:00:01,000 --> 00:00:02,000\n${'word '.repeat(40)}`)[0].text.length > 180);
   // A talk has more than 300 cues, so the transcript import path must not go through parseSrt.
   const youtube = ['WEBVTT', 'Kind: captions', 'Language: en', '', 'intro', '00:00:04.000 --> 00:00:06.000 align:start position:0%', 'Hello there', '', 'NOTE this block is a comment', '', 'STYLE\n::cue { color: red }', '', '00:01.000 --> 00:04.000', 'Short times on both sides', '', '00:00:10.000 --> 01:02:03.456', 'Full form end'].join('\n');

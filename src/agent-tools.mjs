@@ -24,7 +24,7 @@ const options = object({
   fadeIn: number(0, 3), fadeOut: number(0, 3), duckMusic: bool, reduceRumble: bool,
   sourceChannel: choice(['stereo', 'left', 'right', 'mono']), narration: string(), narrationStart: number(0, T), narrationTrimStart: number(0, S), narrationGain: number(0, 2),
   masterFormat: choice([...MASTER_FORMATS]), socialSize: choice([...SOCIAL_SIZES]), exportVertical: bool, exportShare: bool, exportSquare: bool, exportPortrait: bool,
-  captions: { type: 'array', items: caption, maxItems: 300 }, captionOffset: number(-30, 30),
+  captions: { type: 'array', items: caption, maxItems: LIMITS.captions }, captionOffset: number(-30, 30),
   captionStyle: choice(['box', 'bold', 'minimal']), captionPosition: choice(['low', 'middle', 'high']), musicTrimStart: number(0, 600),
   captionAnimation: choice(['none', 'karaoke', 'pop', 'highlight', 'words']), captionCase: choice(['normal', 'upper']),
   markers: { type: 'array', maxItems: 100, items: object({ time: number(0, T), label: string(60), color: choice(['yellow', 'red', 'green', 'blue']) }, ['time']) },
@@ -467,9 +467,36 @@ function flagArguments(tool, flags) {
   return args;
 }
 
+const toolName = command => String(command ?? '').trim().toLowerCase().replace(/-/g, '_');
+
+function editDistance(a, b) {
+  let previous = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= b.length; j++) {
+      row[j] = Math.min(previous[j] + 1, row[j - 1] + 1, previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    previous = row;
+  }
+  return previous[b.length];
+}
+
+function unknownToolError(command) {
+  const typed = toolName(command);
+  const names = agentTools.map(t => t.name.replace(/^studio_/, ''));
+  let close = null;
+  let best = 3;
+  for (const name of names) {
+    const distance = editDistance(typed, name);
+    if (distance < best) { best = distance; close = name; }
+  }
+  const hint = close ? ` Did you mean ${close}?` : '';
+  return new StudioError('UNKNOWN_TOOL', `Unknown tool: studio_${typed}.${hint} Tools: ${names.join(', ')}.`);
+}
+
 export function studioHelp(command) {
-  const tool = agentTools.find(t => t.name === `studio_${command}`);
-  if (!tool) throw new StudioError('UNKNOWN_TOOL', `Unknown tool: studio_${command}. Tools: ${agentTools.map(t => t.name.replace(/^studio_/, '')).join(', ')}.`);
+  const tool = agentTools.find(t => t.name === `studio_${toolName(command)}`);
+  if (!tool) throw unknownToolError(command);
   const { properties = {}, required = [] } = tool.inputSchema;
   const lines = [`${tool.name}: ${tool.description}`, '', `Usage: node cli.mjs studio ${command} [flags]`, '', 'Flags:'];
   for (const [name, schema] of Object.entries(properties)) {
@@ -488,10 +515,10 @@ export async function runStudioCommand(command, flags, api) {
     try { args = JSON.parse(content.replace(/^\uFEFF/, '')); } catch { throw new StudioError('INVALID_JSON', 'Request must be a JSON object.'); }
     if (args === null || typeof args !== 'object' || Array.isArray(args)) throw new StudioError('INVALID_JSON', 'Request must be a JSON object.');
   }
-  const tool = agentTools.find(t => t.name === `studio_${command}`);
-  if (!tool) throw new StudioError('UNKNOWN_TOOL', `Unknown tool: studio_${command}`);
+  const tool = agentTools.find(t => t.name === `studio_${toolName(command)}`);
+  if (!tool) throw unknownToolError(command);
   Object.assign(args, flagArguments(tool, flags));
-  let result = await callAgentTool(`studio_${command}`, args, api);
+  let result = await callAgentTool(tool.name, args, api);
   for (const key of ['frame', 'storyboard']) if (result[key]?.imageBase64) { const { imageBase64, ...rest } = result[key]; result = { ...result, [key]: rest }; }
   if (flags.wait === true || flags.wait === 'true') {
     const deadline = Date.now() + 30 * 60_000;

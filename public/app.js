@@ -715,16 +715,19 @@ async function selectJob(id, { scroll = true } = {}) {
 
 function formPayload() {
   const data = new FormData(elements.form);
+  // Leave blank numeric fields out instead of sending Number('') === 0, so the
+  // server can apply its defaults rather than refusing a zero (#134).
+  const optionalNumber = value => normaliseText(value).trim() || undefined;
   return {
     project: normaliseText(data.get("project")).trim(),
     input: normaliseText(data.get("input")).trim(),
-    duration: Number(data.get("duration")),
+    duration: optionalNumber(data.get("duration")),
     style: normaliseText(data.get("style")),
     title: normaliseText(data.get("title")).trim(),
     music: normaliseText(data.get("music")).trim(),
     output: normaliseText(data.get("output")).trim(),
     resolution: normaliseText(data.get("resolution")),
-    fps: Number(data.get("fps")),
+    fps: optionalNumber(data.get("fps")),
     preview: data.get("preview") === "on"
   };
 }

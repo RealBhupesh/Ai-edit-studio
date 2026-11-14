@@ -7,6 +7,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { StudioError } from './paths.mjs';
 import { runProcess } from './process.mjs';
+import { STYLES, MOODS } from './music/compose.mjs';
 
 export const STORY_VERSION = 'aes.story/1';
 export const STORY_ENGINE_VERSION = 1;
@@ -261,6 +262,15 @@ export function compileStory(story) {
   const music = story.music === undefined ? {} : story.music;
   if (!isObj(music)) fail('music must be an object: {bpm, style?, mood?, seed?, file?}.');
   const bpm = num(music.bpm, 120, 40, 220, 'music.bpm');
+  // compose() silently falls back to 'pop' / the style's default mood and turns a
+  // non-numeric seed into a random one. Catch bad values here so the dry run and
+  // the build fail with INVALID_STORY instead of quietly composing another track.
+  if (music.style !== undefined && !Object.hasOwn(STYLES, music.style)) fail(`music.style must be one of ${Object.keys(STYLES).join(', ')}.`);
+  if (music.mood !== undefined && !Object.hasOwn(MOODS, music.mood)) fail(`music.mood must be one of ${Object.keys(MOODS).join(', ')}.`);
+  // studio_music takes an integer seed from 0 to 2147483647. Only a real
+  // number in that range is safe: coercing with Number() would also accept
+  // true, "", [], null and "42" and would leave that raw value in the story.
+  if (music.seed !== undefined && (typeof music.seed !== 'number' || !Number.isInteger(music.seed) || music.seed < 0 || music.seed > 2147483647)) fail('music.seed must be an integer from 0 to 2147483647.');
   const beat = 60 / bpm, bar = 4 * beat;
   const style = normalizeStyle(story.style);
   if (!Array.isArray(story.scenes) || !story.scenes.length || story.scenes.length > 60) fail('scenes needs 1 to 60 scenes.');

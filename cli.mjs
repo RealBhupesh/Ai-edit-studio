@@ -174,20 +174,24 @@ function absolutePathFlag(value) {
   return text ? path.resolve(text) : '';
 }
 
-function requestFromFlags(flags, inputOverride = '') {
+// Pass the raw string on: Number('abc') here would turn the bad value into NaN
+// and the error would name the wrong thing. The server validates every request (#134).
+const numericFlag = value => (value === undefined || value === '' || value === null ? undefined : String(value));
+
+export function requestFromFlags(flags, inputOverride = '') {
   return {
     project: flags.project || 'Game trailer',
     input: absolutePathFlag(inputOverride || flags.input),
-    duration: Number(flags.duration || 60),
+    duration: numericFlag(flags.duration),
     style: flags.style || 'action',
     title: flags.title || '',
     music: absolutePathFlag(flags.music),
     output: absolutePathFlag(flags.output),
     resolution: flags.resolution || '2560x1440',
-    fps: Number(flags.fps || 60),
+    fps: numericFlag(flags.fps),
     preview: boolFlag(flags.preview, true),
     previewOnly: boolFlag(flags['preview-only'], false),
-    seed: Number(flags.seed || 42),
+    seed: numericFlag(flags.seed),
   };
 }
 

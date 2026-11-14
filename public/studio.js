@@ -426,7 +426,8 @@ function renderReview() {
   const curves = state.curves;
   const srcs = sources().map((s, i) => ({ ...s, black: curves?.[i]?.black ?? [], scenes: curves?.[i]?.cuts ?? [] }));
   try {
-    state.review = reviewEdit({ clips: state.clips, sources: srcs, options: state.options, beats: currentBeats(), analyzed: Boolean(curves), curves: curves ?? undefined });
+    state.review = reviewEdit({ clips: state.clips, sources: srcs, options: state.options, beats: currentBeats(), analyzed: Boolean(curves), curves: curves ?? undefined,
+      captionsDropped: Number(state.project?.captionsDropped) || 0, captionsDroppedSources: state.project?.captionsDroppedSources ?? [] });
   } catch (e) { console.warn(e); return; }
   const r = state.review;
   badge.hidden = false; badge.textContent = r.score; badge.className = `score-badge ${r.score >= 85 ? 'good' : r.score >= 65 ? 'mid' : 'bad'}`;
@@ -500,7 +501,7 @@ function renderCues() {
   const cues = state.options.captions ?? [];
   $('caption-count').textContent = t('{n} lines', { n: cues.length });
   const root = $('cue-list');
-  root.replaceChildren(...cues.slice(0, 300).map((c, i) => {
+  root.replaceChildren(...cues.slice(0, LIMITS.captions).map((c, i) => {
     const row = el('div', 'cue'); row.append(el('time', '', `${sources()[c.sourceIndex]?.name?.slice(0, 6) ?? '#'} ${formatTime(c.start, 1)}`));
     const input = el('input'); input.value = c.text; input.maxLength = 180; input.setAttribute('aria-label', t('Caption {n}', { n: i + 1 }));
     input.onchange = () => { const text = input.value.trim(); if (!text) return; const next = cues.map((x, j) => j === i ? { ...x, text } : x); setOption('captions', next, { commit: true }); renderTimeline(); };

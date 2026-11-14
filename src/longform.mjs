@@ -2,7 +2,7 @@
 // from a script, plan a multicam edit, and export EDL/FCPXML/OTIO/CSV/chapters/SRT/VTT.
 import { layout, totalDuration, mergeRanges, sectionSpans, applyOperations, LIMITS } from '../public/edit-ops.js';
 import { curvesFor, clipEnergy, highlights } from '../public/insights.js';
-import { findFillers, findPauses, wordsInEdit, bare, joinWords } from '../public/transcript.js';
+import { findFillers, findPauses, wordsInEdit, bare, joinWords, splitWords } from '../public/transcript.js';
 import { mapCaptions, toSrt, toVtt } from '../public/captions.js';
 import { sentences } from './clips.mjs';
 
@@ -103,7 +103,9 @@ export function fitDuration({ clips, sources, transcripts = {}, target, protectH
 }
 
 // ------------------------------------------------------------------ search
-const tokens = text => String(text ?? '').split(/\s+/).map(bare).filter(Boolean);
+// CJK text has no spaces: use the same word segmentation as transcripts, so a
+// query typed as one phrase matches the words the transcript was split into.
+const tokens = text => splitWords(String(text ?? '')).map(bare).filter(Boolean);
 function editDistance(a, b, max) {
   if (Math.abs(a.length - b.length) > max) return max + 1;
   let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
